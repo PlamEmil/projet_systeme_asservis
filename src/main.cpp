@@ -117,7 +117,7 @@ void loop()
 
   float ah = sqrt(a.acceleration.x * a.acceleration.x + a.acceleration.y * a.acceleration.y);
   printf("AH: %.2f\n", ah);
-  float angle = atan2(ah, a.acceleration.z) * 180.0 / PI; // Use atan2 for signed angles
+  float angle = -atan2(a.acceleration.x, a.acceleration.z) * 180.0 / PI; // Use atan2 for signed angles
   Serial.print("Angle: ");
   Serial.print(angle);
   Serial.println(" degrees");
