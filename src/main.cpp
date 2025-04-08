@@ -26,8 +26,6 @@ void rotary_onButtonClick()
   }
   lastTimePressed = millis();
   Serial.print("button pressed ");
-  Serial.print(millis());
-  Serial.println(" milliseconds after restart");
 }
 
 void IRAM_ATTR readEncoderISR()
