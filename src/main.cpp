@@ -1,93 +1,123 @@
-// Basic demo for accelerometer readings from Adafruit MPU6050
-
 #include <Arduino.h>
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
 #include <Wire.h>
 #include <AiEsp32RotaryEncoder.h>
 
+// ----- PID -----
+float setpoint = 3.0;       // Maintenant variable dynamique
+#define DT 10               // Intervalle en ms
+#define AFFICHAGE (1000 / DT)
+#define K0 6.65
+#define KP 0.01
+
+int compteur = 0;
+
+// ----- MPU -----
 Adafruit_MPU6050 mpu;
 
+// ----- ROTARY ENCODER -----
 #define ROTARY_ENCODER_A_PIN 5
 #define ROTARY_ENCODER_B_PIN 18
 #define ROTARY_ENCODER_BUTTON_PIN 19
 #define ROTARY_ENCODER_VCC_PIN -1
 #define ROTARY_ENCODER_STEPS 4
 
-// instead of changing here, rather change numbers above
-AiEsp32RotaryEncoder rotaryEncoder = AiEsp32RotaryEncoder(ROTARY_ENCODER_A_PIN, ROTARY_ENCODER_B_PIN, ROTARY_ENCODER_BUTTON_PIN, ROTARY_ENCODER_VCC_PIN, ROTARY_ENCODER_STEPS);
+AiEsp32RotaryEncoder rotaryEncoder = AiEsp32RotaryEncoder(
+  ROTARY_ENCODER_A_PIN,
+  ROTARY_ENCODER_B_PIN,
+  ROTARY_ENCODER_BUTTON_PIN,
+  ROTARY_ENCODER_VCC_PIN,
+  ROTARY_ENCODER_STEPS
+);
 
-void rotary_onButtonClick()
-{
-  static unsigned long lastTimePressed = 0; // Soft debouncing
-  if (millis() - lastTimePressed < 500)
-  {
-    return;
-  }
-  lastTimePressed = millis();
-  Serial.print("button pressed ");
-}
+// ----- PWM -----
+#define PWM_PIN 13
+#define PWM_CHANNEL 0
+#define PWM_FREQ 50
+#define PWM_RESOLUTION 12
 
-void IRAM_ATTR readEncoderISR()
-{
+// ----- ISR -----
+void IRAM_ATTR readEncoderISR() {
   rotaryEncoder.readEncoder_ISR();
 }
 
-void setup(void)
-{
+// ----- SETUP -----
+void setup() {
   Serial.begin(115200);
-  while (!Serial)
-    delay(10); // will pause Zero, Leonardo, etc until serial console opens
+  while (!Serial) delay(10);
 
-  Serial.println("Adafruit MPU6050 test!");
-
-  // Try to initialize!
-  if (!mpu.begin())
-  {
-    Serial.println("Failed to find MPU6050 chip");
-    while (1)
-    {
-      delay(10);
-    }
+  // MPU INIT
+  if (!mpu.begin()) {
+    Serial.println("MPU6050 non détecté");
+    while (1) delay(10);
   }
-  Serial.println("MPU6050 Found!");
-
   mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
   mpu.setGyroRange(MPU6050_RANGE_500_DEG);
   mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
-  Serial.print("Filter bandwidth set to: ");
+  Serial.println("MPU6050 prêt");
 
+  // PWM INIT
+  ledcSetup(PWM_CHANNEL, PWM_FREQ, PWM_RESOLUTION);
+  ledcAttachPin(PWM_PIN, PWM_CHANNEL);
+
+  // ENCODER INIT
   rotaryEncoder.begin();
   rotaryEncoder.setup(readEncoderISR);
-  bool circleValues = false;
-  rotaryEncoder.setBoundaries(0, 1000, circleValues);
+  rotaryEncoder.setBoundaries(-45, 45, false); // plage du setpoint
+  rotaryEncoder.setEncoderValue((int)setpoint); // valeur initiale
   rotaryEncoder.disableAcceleration();
 
-  Serial.println("");
-  delay(100);
+  Serial.println("Setup terminé");
+  ledcWrite(PWM_CHANNEL, 200.655); // PWM à 0 au démarrage
+  delay(5000); // Laisser le temps au moteur de se stabiliser
 }
 
-void loop()
-{
+// ----- LOOP -----
+void loop() {
+  static unsigned long lastTime = 0;
+  unsigned long currentTime = millis();
 
-  if (rotaryEncoder.encoderChanged())
-  {
-    Serial.print("Value: ");
-    Serial.println(rotaryEncoder.readEncoder());
+  if (currentTime - lastTime >= DT) {
+    lastTime = currentTime;
+    compteur++;
+
+    // 1. Lire le setpoint de l’encodeur
+    if (rotaryEncoder.encoderChanged()) {
+      setpoint = (float)rotaryEncoder.readEncoder(); // en degrés
+      Serial.print("Setpoint modifié: ");
+      Serial.println(setpoint);
+    }
+
+    // 2. Lire angle du capteur
+    sensors_event_t a, g, temp;
+    mpu.getEvent(&a, &g, &temp);
+    float angle = -atan2(a.acceleration.x, a.acceleration.z) * 180.0 / PI;
+
+    // 3. Contrôle P
+    float erreur = setpoint - angle;
+    float sortie = K0 + KP * erreur;
+    sortie = sortie > 6.9 ? 6.9 : sortie; // Limiter la sortie à 6.9 pour éviter le dépassement
+    sortie = sortie < 6.4 ? 6.4 : sortie; // Limiter la sortie à 0.0 pour éviter le dépassement
+
+    int pwmValue = (int)((sortie / 100.0) * 4095.0);
+    ledcWrite(PWM_CHANNEL, pwmValue);
+
+    // 4. Affichage toutes les x itérations
+    if (compteur >= AFFICHAGE) {
+      compteur = 0;
+      Serial.print(">");
+      Serial.print("var1: ");
+      Serial.print(angle);
+      Serial.print(",");
+      Serial.print("var2: ");
+      Serial.print(setpoint);
+      Serial.println("");
+    }
   }
-  if (rotaryEncoder.isEncoderButtonClicked())
-  {
-    rotary_onButtonClick();
+
+  // Optional: bouton sur encodeur
+  if (rotaryEncoder.isEncoderButtonClicked()) {
+    Serial.println("Bouton cliqué (action future?)");
   }
-
-  /* Get new sensor events with the readings */
-  sensors_event_t a, g, temp;
-  mpu.getEvent(&a, &g, &temp);
-  float angle = -atan2(a.acceleration.x, a.acceleration.z) * 180.0 / PI; // Use atan2 for signed angles
-  Serial.print("Angle: ");
-  Serial.print(angle);
-  Serial.println(" degrees");
-
-  Serial.println("");
-  delay(500);
 }
