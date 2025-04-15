@@ -7,10 +7,11 @@
 // ----- PID -----
 float setPoint_deg = 3.0;       // Maintenant variable dynamique
 #define DT_ms 10               // Intervalle en ms
-#define K0 7.2
-#define KP 0.01
+#define K0 0
+#define KP 0.03
 #define KI 0.0
 #define KD 0.0
+#define GAIN_GRAVITE 7.2
 
 int compteur_affichage = 0;
 
@@ -23,6 +24,7 @@ Adafruit_MPU6050 mpu;
 #define ROTARY_ENCODER_BUTTON_PIN 19
 #define ROTARY_ENCODER_VCC_PIN -1
 #define ROTARY_ENCODER_STEPS 4
+
 
 AiEsp32RotaryEncoder rotaryEncoder = AiEsp32RotaryEncoder(
   ROTARY_ENCODER_A_PIN,
@@ -71,7 +73,11 @@ void setup() {
 
   Serial.println("Setup terminé");
   ledcWrite(PWM_CHANNEL, 200.655); // PWM à 4.9% au démarrage
-  delay(5000); // Laisser le temps au moteur de se stabiliser
+  delay(2000); // Laisser le temps au moteur de se stabiliser
+  for (int i = 200; i < 280; i++) {
+    ledcWrite(PWM_CHANNEL, i);
+    delay(50);
+  }
 }
 
 // ----- LOOP -----
@@ -93,13 +99,17 @@ void loop() {
     // 2. Lire angle du capteur
     sensors_event_t a, g, temp;
     mpu.getEvent(&a, &g, &temp);
-    float angle_deg = -atan2(a.acceleration.x, a.acceleration.z) * 180.0 / PI;
+    float angle_rad = -atan2(a.acceleration.x, a.acceleration.z);
+    float angle_deg = (angle_rad * 180) / PI; // Ajustement pour l'orientation du capteur
 
     // 3. Contrôle P
     float erreur = setPoint_deg - angle_deg;
     float integrale_erreur = integrale_erreur + (erreur * (DT_ms / 1000)); // Erreur intégrée sur 10ms
 
-    float sortie = K0 + KP * erreur;
+    float compensation_gravite = GAIN_GRAVITE * cos(angle_rad); // Compensation de la gravité
+
+    float Proportional = KP * erreur; // Contrôle proportionnel
+    float sortie = K0 + Proportional + compensation_gravite;
     
     sortie = sortie > 7.3 ? 7.3 : sortie; // Limiter la sortie à 6.9 pour éviter le dépassement
     sortie = sortie < 7 ? 7 : sortie; // Limiter la sortie à 0.0 pour éviter le dépassement
@@ -122,6 +132,12 @@ void loop() {
       Serial.print(",");
       Serial.print("sortie: ");
       Serial.print(sortie);
+      Serial.print(",");
+      Serial.print("KP: ");
+      Serial.print(Proportional);
+      Serial.print(",");
+      Serial.print("Gravite: ");
+      Serial.print(compensation_gravite);
       Serial.println("");
     }
   }
